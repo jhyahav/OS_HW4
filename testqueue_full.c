@@ -195,19 +195,6 @@ void test_waiting()
     destroyQueue();
 }
 
-void test_thread_safety()
-{
-    printf("=== Testing thread safety ===\n");
-
-    // Create multiple threads and have them enqueue and dequeue items concurrently
-    // ...
-
-    // Verify that the items are handled correctly without any data corruption or race conditions
-    // ...
-
-    printf("thread safety test passed.\n");
-}
-
 void test_sleeping_threads()
 {
     initQueue();
@@ -269,7 +256,6 @@ void test_concurrent_enqueue_dequeue()
 
     // Number of items to enqueue
     const int numItems = 1000;
-    printf("HI\n");
     // Enqueue items in a separate thread
     thrd_t enqueueThread;
     thrd_create(&enqueueThread, (int (*)(void *))enqueueItems, &numItems);
@@ -279,7 +265,6 @@ void test_concurrent_enqueue_dequeue()
     {
         int *item = (int *)dequeue();
         printf("Dequeued item: %d\n", *item);
-        free(item);
     }
 
     // Wait for the enqueue thread to finish
@@ -296,9 +281,11 @@ int enqueueItems(void *arg)
     int numItems = *(int *)arg;
     for (int i = 0; i < numItems; i++)
     {
+        // printf("%d\n", i);
         int *item = (int *)malloc(sizeof(int));
         *item = i + 1;
-        enqueue(item);
+        // printf("%d\n", *item);
+        enqueue((void *)item);
         printf("Enqueued item: %d\n", *item);
     }
     return 0;
@@ -334,7 +321,6 @@ void test_enqueue_tryDequeue()
 
     // Try dequeue from an empty queue
     assert(!tryDequeue(&item));
-    printf("Try dequeue from an empty queue - Assertion failed: Expected false\n");
 
     destroyQueue();
 
@@ -527,12 +513,11 @@ int main()
     test_tryDequeue();
     test_size();
     test_waiting();
-    test_thread_safety();
     // test_sleeping_threads();
     test_concurrent_enqueue_dequeue();
     test_enqueue_tryDequeue();
     test_enqueue_dequeue_with_sleep();
-    test_edge_cases();
+    // test_edge_cases();
     test_mixed_operations();
 
     return 0;

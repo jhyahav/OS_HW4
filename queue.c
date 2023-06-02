@@ -117,10 +117,7 @@ void destroy_thread_queue(void)
 void enqueue(const void *element_data)
 {
     struct DataElement *new_element = create_element(element_data);
-    printf("Testttt\n");
-
     mtx_lock(&data_queue.data_queue_lock);
-    printf("LOCKEED\n");
     add_element_to_data_queue(new_element);
     mtx_unlock(&data_queue.data_queue_lock);
 
@@ -164,12 +161,9 @@ void *dequeue(void)
     // This loop blocks as required
     while (current_thread_should_sleep())
     {
-        printf("Test!!\n");
         thread_enqueue();
         struct ThreadElement *current = thread_queue.tail;
-        printf("WAIT\n");
-        cnd_wait(&current->cnd_thread, &thread_queue.thread_queue_lock); // FIXME: might we need the other lock here?
-        printf("AWAKE\n");
+        cnd_wait(&current->cnd_thread, &data_queue.data_queue_lock);
         if (current->terminated)
         {
             // Prevents runaway threads upon destruction

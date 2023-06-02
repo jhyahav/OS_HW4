@@ -14,6 +14,7 @@ struct ThreadElement
 {
     thrd_t id;
     struct ThreadElement *next;
+    // Each thread has its own condition variable so we can signal it independently.
     cnd_t cnd_thread;
     bool terminated;
 };
@@ -46,7 +47,15 @@ struct DataElement *create_element(const void *data);
 
 void initQueue(void)
 {
-    // TODO: implement
+    data_queue.head = NULL;
+    thread_queue.head = NULL;
+    data_queue.tail = NULL;
+    thread_queue.tail = NULL;
+    data_queue.queue_size = 0;
+    thread_queue.waiting_count = 0;
+    data_queue.visited_count = 0;
+    mtx_init(&data_queue.data_queue_lock, mtx_plain);
+    mtx_init(&thread_queue.thread_queue_lock, mtx_plain);
 }
 
 void destroyQueue(void)
@@ -65,6 +74,7 @@ void free_all_data_elements(void)
         data_queue.head = prev_head->next;
         free(prev_head);
     }
+    // Resetting the fields is not strictly necessary, but just for good measure.
     data_queue.tail = NULL;
     data_queue.visited_count = 0;
     data_queue.queue_size = 0;
@@ -93,6 +103,7 @@ void destroy_thread_queue(void)
 
 void enqueue(const void *element_data)
 {
+    // TODO: add cnd_signal
     struct DataElement *new_element = create_element(element_data);
     mtx_lock(&data_queue.data_queue_lock);
     add_element_to_data_queue(new_element);

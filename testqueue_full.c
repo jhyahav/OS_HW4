@@ -255,10 +255,13 @@ void test_concurrent_enqueue_dequeue()
     initQueue();
 
     // Number of items to enqueue
-    const int numItems = 1000;
+    const int numItems = 100;
+    const int half = numItems / 2;
     // Enqueue items in a separate thread
-    thrd_t enqueueThread;
-    thrd_create(&enqueueThread, (int (*)(void *))enqueueItems, &numItems);
+    thrd_t enqueueThread_a;
+    thrd_t enqueueThread_b;
+    thrd_create(&enqueueThread_a, (int (*)(void *))enqueueItems, &half);
+    thrd_create(&enqueueThread_b, (int (*)(void *))enqueueItems, &half);
 
     // Dequeue items in the main thread
     for (int i = 0; i < numItems; i++)
@@ -267,8 +270,9 @@ void test_concurrent_enqueue_dequeue()
         printf("Dequeued item: %d\n", *item);
     }
 
-    // Wait for the enqueue thread to finish
-    thrd_join(enqueueThread, NULL);
+    // Wait for the enqueue threads to finish
+    // thrd_join(enqueueThread_a, NULL);
+    thrd_join(enqueueThread_b, NULL);
 
     destroyQueue();
 

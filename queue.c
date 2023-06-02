@@ -170,7 +170,7 @@ void thread_enqueue()
 {
     struct ThreadElement *new_thread_element = create_thread_element();
     mtx_lock(&thread_queue.thread_queue_lock);
-    add_element_to_thread_queue();
+    add_element_to_thread_queue(new_thread_element);
     mtx_unlock(&thread_queue.thread_queue_lock);
 }
 
@@ -189,8 +189,23 @@ void thread_dequeue()
     mtx_unlock(&thread_queue.thread_queue_lock);
 }
 
-void add_element_to_thread_queue()
+void add_element_to_thread_queue(struct ThreadElement *new_element)
 {
+    thread_queue.waiting_count == 0 ? add_element_to_empty_data_queue(new_element) : add_element_to_nonempty_data_queue(new_element);
+}
+
+void add_element_to_empty_thread_queue(struct ThreadElement *new_element)
+{
+    thread_queue.head = new_element;
+    thread_queue.tail = new_element;
+    thread_queue.waiting_count++; // FIXME: blocking for waiting()?
+}
+
+void add_element_to_nonempty_thread_queue(struct ThreadElement *new_element)
+{
+    thread_queue.tail->next = new_element;
+    thread_queue.tail = new_element;
+    thread_queue.waiting_count++; // FIXME: blocking for waiting()?
 }
 
 struct ThreadElement *create_thread_element()

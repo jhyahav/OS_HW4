@@ -1,14 +1,16 @@
 #include "queue.h"
 #include <threads.h>
+#include <stdatomic.h>
 
 // We implement the queue as a linked list, saving its head and tail.
 struct Queue
 {
     struct Element *head;
     struct Element *tail;
-    size_t queue_size; // TODO: make me atomic?
+    atomic_ulong queue_size;
     size_t waiting_count;
-    size_t visited_count;
+    atomic_ulong visited_count;
+    mtx_t lock;
 };
 
 struct Element
@@ -32,8 +34,9 @@ void destroyQueue(void)
 void enqueue(const void *element_data)
 {
     struct Element *new_element = create_element(element_data);
-    // TODO: add locking around next line
+    mtx_lock(&queue.lock);
     add_element_to_queue(new_element);
+    mtx_unlock(&queue.lock);
 }
 
 struct Element *create_element(const void *data)
@@ -54,18 +57,21 @@ void add_element_to_empty_queue(struct Element *new_element)
 {
     queue.head = new_element;
     queue.tail = new_element;
-    queue.queue_size += 1;
+    queue.queue_size++; // FIXME: blocking for size()?
 }
 
 void add_element_to_nonempty_queue(struct Element *new_element)
 {
     queue.tail->next = new_element;
     queue.tail = new_element;
-    queue.queue_size += 1;
+    queue.queue_size++; // FIXME: blocking for size()?
 }
 
 void *dequeue(void)
 {
+    mtx_lock(&queue.lock);
+    // TODO: add implementation
+    mtx_unlock(&queue.lock);
 }
 
 bool tryDequeue(void **element)

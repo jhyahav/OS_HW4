@@ -117,9 +117,13 @@ void destroy_thread_queue(void)
 void enqueue(const void *element_data)
 {
     struct DataElement *new_element = create_element(element_data);
+    printf("Testttt\n");
+
     mtx_lock(&data_queue.data_queue_lock);
+    printf("LOCKEED\n");
     add_element_to_data_queue(new_element);
     mtx_unlock(&data_queue.data_queue_lock);
+
     while (data_queue.queue_size > 0 && thread_queue.waiting_count > 0)
     {
         cnd_signal(&thread_queue.head->cnd_thread);
@@ -160,9 +164,12 @@ void *dequeue(void)
     // This loop blocks as required
     while (current_thread_should_sleep())
     {
+        printf("Test!!\n");
         thread_enqueue();
         struct ThreadElement *current = thread_queue.tail;
+        printf("WAIT\n");
         cnd_wait(&current->cnd_thread, &thread_queue.thread_queue_lock); // FIXME: might we need the other lock here?
+        printf("AWAKE\n");
         if (current->terminated)
         {
             // Prevents runaway threads upon destruction
@@ -189,8 +196,8 @@ bool current_thread_should_sleep(void) // TODO: ensure no multiple entries in th
 {
     bool queue_is_empty = data_queue.queue_size == 0;
     bool waiting_threads_exist = thread_queue.waiting_count > 0; // FIXME: is this necessary?
-    bool current_is_oldest_thread = thrd_equal(thrd_current(), thread_queue.head->id);
-    return queue_is_empty || (waiting_threads_exist && !current_is_oldest_thread);
+    // bool current_is_oldest_thread = thrd_equal(thrd_current(), thread_queue.head->id);
+    return queue_is_empty; //|| (waiting_threads_exist && !current_is_oldest_thread);
 }
 
 void thread_enqueue(void)
@@ -248,7 +255,7 @@ struct ThreadElement *create_thread_element(void)
 bool tryDequeue(void **element)
 {
     mtx_lock(&data_queue.data_queue_lock);
-    if (data_queue.queue_size == 0)
+    while (data_queue.queue_size == 0 || data_queue.head == NULL)
     {
         mtx_unlock(&data_queue.data_queue_lock);
         return false;

@@ -1,6 +1,7 @@
 #include "queue.h"
 #include <threads.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 
 struct ThreadQueue
 {
@@ -43,7 +44,19 @@ static struct ThreadQueue thread_queue;
 static struct DataQueue data_queue;
 static thrd_t terminator;
 
+void free_all_data_elements(void);
+void destroy_thread_queue(void);
 struct DataElement *create_element(const void *data);
+void add_element_to_data_queue(struct DataElement *new_element);
+void add_element_to_empty_data_queue(struct DataElement *new_element);
+void add_element_to_nonempty_data_queue(struct DataElement *new_element);
+bool current_thread_should_sleep(void);
+void thread_enqueue(void);
+void thread_dequeue(void);
+void add_element_to_thread_queue(struct ThreadElement *new_element);
+void add_element_to_empty_thread_queue(struct ThreadElement *new_element);
+void add_element_to_nonempty_thread_queue(struct ThreadElement *new_element);
+struct ThreadElement *create_thread_element(void);
 
 void initQueue(void)
 {
@@ -103,11 +116,14 @@ void destroy_thread_queue(void)
 
 void enqueue(const void *element_data)
 {
-    // TODO: add cnd_signal
     struct DataElement *new_element = create_element(element_data);
     mtx_lock(&data_queue.data_queue_lock);
     add_element_to_data_queue(new_element);
     mtx_unlock(&data_queue.data_queue_lock);
+    while (data_queue.queue_size > 0 && thread_queue.waiting_count > 0)
+    {
+        cnd_signal(&thread_queue.head->cnd_thread);
+    }
 }
 
 struct DataElement *create_element(const void *data)
@@ -164,12 +180,12 @@ void *dequeue(void)
     data_queue.queue_size--;
     data_queue.visited_count++;
     mtx_unlock(&data_queue.data_queue_lock);
-    void *data = dequeued_data->data;
+    const void *data = dequeued_data->data;
     free(dequeued_data);
     return data;
 }
 
-bool current_thread_should_sleep() // TODO: ensure no multiple entries in thread queue.
+bool current_thread_should_sleep(void) // TODO: ensure no multiple entries in thread queue.
 {
     bool queue_is_empty = data_queue.queue_size == 0;
     bool waiting_threads_exist = thread_queue.waiting_count > 0; // FIXME: is this necessary?
@@ -177,7 +193,7 @@ bool current_thread_should_sleep() // TODO: ensure no multiple entries in thread
     return queue_is_empty || (waiting_threads_exist && !current_is_oldest_thread);
 }
 
-void thread_enqueue()
+void thread_enqueue(void)
 {
     struct ThreadElement *new_thread_element = create_thread_element();
     mtx_lock(&thread_queue.thread_queue_lock);
@@ -185,7 +201,7 @@ void thread_enqueue()
     mtx_unlock(&thread_queue.thread_queue_lock);
 }
 
-void thread_dequeue()
+void thread_dequeue(void)
 {
     mtx_lock(&thread_queue.thread_queue_lock);
     cnd_destroy(&thread_queue.head->cnd_thread);
@@ -202,7 +218,7 @@ void thread_dequeue()
 
 void add_element_to_thread_queue(struct ThreadElement *new_element)
 {
-    thread_queue.waiting_count == 0 ? add_element_to_empty_data_queue(new_element) : add_element_to_nonempty_data_queue(new_element);
+    thread_queue.waiting_count == 0 ? add_element_to_empty_thread_queue(new_element) : add_element_to_nonempty_thread_queue(new_element);
 }
 
 void add_element_to_empty_thread_queue(struct ThreadElement *new_element)
@@ -219,13 +235,14 @@ void add_element_to_nonempty_thread_queue(struct ThreadElement *new_element)
     thread_queue.waiting_count++; // FIXME: blocking for waiting()?
 }
 
-struct ThreadElement *create_thread_element()
+struct ThreadElement *create_thread_element(void)
 {
     struct ThreadElement *thread_element = (struct ThreadElement *)malloc(sizeof(struct ThreadElement));
     thread_element->id = thrd_current();
     thread_element->next = NULL;
     thread_element->terminated = false;
     cnd_init(&thread_element->cnd_thread);
+    return thread_element;
 }
 
 bool tryDequeue(void **element)

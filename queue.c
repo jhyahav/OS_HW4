@@ -15,6 +15,7 @@ struct ThreadElement
     thrd_t id;
     struct ThreadElement *next;
     cnd_t cnd_thread;
+    bool terminated;
 };
 
 // We implement the queue as a linked list, saving its head and tail.
@@ -25,8 +26,6 @@ struct DataQueue
     atomic_ulong queue_size;
     atomic_ulong visited_count;
     mtx_t data_queue_lock;
-    cnd_t enq;
-    cnd_t deq;
 };
 
 struct DataElement
@@ -41,27 +40,55 @@ struct DataElement
 */
 static struct ThreadQueue thread_queue;
 static struct DataQueue data_queue;
+static thrd_t terminator;
 
 struct DataElement *create_element(const void *data);
 
 void initQueue(void)
 {
+    // TODO: implement
 }
 
 void destroyQueue(void)
 {
-    mtx_destroy(&data_queue.data_queue_lock);
-    cnd_destroy(&data_queue.enq);
-    cnd_destroy(&data_queue.deq);
+    free_all_data_elements();
     destroy_thread_queue();
+}
+
+void free_all_data_elements(void)
+{
+    mtx_lock(&data_queue.data_queue_lock);
+    struct DataElement *prev_head;
+    while (data_queue.head != NULL)
+    {
+        prev_head = data_queue.head;
+        data_queue.head = prev_head->next;
+        free(prev_head);
+    }
+    data_queue.tail = NULL;
+    data_queue.visited_count = 0;
+    data_queue.queue_size = 0;
+    mtx_unlock(&data_queue.data_queue_lock);
+    mtx_destroy(&data_queue.data_queue_lock);
 }
 
 void destroy_thread_queue(void)
 {
+    mtx_lock(&thread_queue.thread_queue_lock);
+    terminator = thrd_current();
+    struct ThreadElement *prev_head;
     while (thread_queue.head != NULL)
     {
-        // TODO: implement
+        prev_head = thread_queue.head;
+        thread_queue.head = prev_head->next;
+        prev_head->terminated = true;
+        cnd_signal(&prev_head->cnd_thread);
+        free(prev_head);
     }
+    thread_queue.tail = NULL;
+    thread_queue.waiting_count = 0;
+    mtx_unlock(&thread_queue.thread_queue_lock);
+    mtx_destroy(&thread_queue.thread_queue_lock);
 }
 
 void enqueue(const void *element_data)
@@ -107,7 +134,13 @@ void *dequeue(void)
     while (current_thread_should_sleep())
     {
         thread_enqueue();
-        cnd_wait(&thread_queue.tail->cnd_thread, &thread_queue.thread_queue_lock); // FIXME: might we need the other lock here?
+        struct ThreadElement *current = thread_queue.tail;
+        cnd_wait(&current->cnd_thread, &thread_queue.thread_queue_lock); // FIXME: might we need the other lock here?
+        if (current->terminated)
+        {
+            // Prevents runaway threads upon destruction
+            thrd_join(terminator, NULL);
+        }
         thread_dequeue();
     }
 
@@ -118,6 +151,7 @@ void *dequeue(void)
         data_queue.tail = NULL;
     }
     data_queue.queue_size--;
+    data_queue.visited_count++;
     mtx_unlock(&data_queue.data_queue_lock);
     void *data = dequeued_data->data;
     free(dequeued_data);
@@ -127,9 +161,9 @@ void *dequeue(void)
 bool current_thread_should_sleep() // TODO: ensure no multiple entries in thread queue.
 {
     bool queue_is_empty = data_queue.queue_size == 0;
-    bool waiting_threads_exist = thread_queue.waiting_count > 0;
+    bool waiting_threads_exist = thread_queue.waiting_count > 0; // FIXME: is this necessary?
     bool current_is_oldest_thread = thrd_equal(thrd_current(), thread_queue.head->id);
-    return queue_is_empty || (waiting_threads_exist && current_is_oldest_thread);
+    return queue_is_empty || (waiting_threads_exist && !current_is_oldest_thread);
 }
 
 void thread_enqueue()
@@ -164,6 +198,7 @@ struct ThreadElement *create_thread_element()
     struct ThreadElement *thread_element = (struct ThreadElement *)malloc(sizeof(struct ThreadElement));
     thread_element->id = thrd_current();
     thread_element->next = NULL;
+    thread_element->terminated = false;
     cnd_init(&thread_element->cnd_thread);
 }
 
@@ -183,6 +218,7 @@ bool tryDequeue(void **element)
         data_queue.tail = NULL;
     }
     data_queue.queue_size--;
+    data_queue.visited_count++;
     mtx_unlock(&data_queue.data_queue_lock);
     *element = (void *)dequeued_data->data;
     free(dequeued_data);

@@ -202,7 +202,7 @@ void test_sleeping_threads()
     const int NUM_THREADS = 5;
     const int NUM_ITEMS = 10;
     const int SLEEP_TIME_MIN = 5;
-    const int SLEEP_TIME_MAX = 10;
+    // const int SLEEP_TIME_MAX = 10;
 
     // Enqueue items
     for (int i = 1; i <= NUM_ITEMS; i++)
@@ -255,8 +255,8 @@ void test_concurrent_enqueue_dequeue()
     initQueue();
 
     // Number of items to enqueue
-    const int numItems = 100;
-    const int half = numItems / 2;
+    int numItems = 100;
+    int half = numItems / 2;
     // Enqueue items in a separate thread
     thrd_t enqueueThread_a;
     thrd_t enqueueThread_b;
@@ -272,7 +272,7 @@ void test_concurrent_enqueue_dequeue()
 
     // Wait for the enqueue threads to finish
     // thrd_join(enqueueThread_a, NULL);
-    thrd_join(enqueueThread_b, NULL);
+    // thrd_join(enqueueThread_b, NULL);
 
     destroyQueue();
 
@@ -292,7 +292,7 @@ int enqueueItems(void *arg)
         enqueue((void *)item);
         printf("Enqueued item: %d\n", *item);
     }
-    return 0;
+    thrd_exit(0);
 }
 
 void test_enqueue_tryDequeue()

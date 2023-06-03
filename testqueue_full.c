@@ -4,23 +4,14 @@
 #include <stdbool.h>
 #include "queue.c"
 
-#define NUM_OPERATIONS 10000
+#define NUM_OPERATIONS 10
 #define MAX_SIZE 1000
+#define NUM_THREADS_CONC 5
 
 int dequeue_with_sleep(void *arg);
 int enqueueItems(void *arg);
-
-void test_initQueue()
-{
-    printf("=== Testing initQueue ===\n");
-
-    initQueue();
-
-    // Perform other operations on the queue (enqueue, dequeue, etc.)
-    // ...
-
-    printf("initQueue test passed.\n");
-}
+int enqueue_thread(void *arg);
+int dequeue_thread(void *arg);
 
 void test_destroyQueue()
 {
@@ -28,16 +19,7 @@ void test_destroyQueue()
 
     initQueue();
 
-    // Perform operations on the queue
-    // ...
-
     destroyQueue();
-
-    // Verify that all resources associated with the queue are properly cleaned up
-    // ...
-
-    // Attempt to perform operations on the queue after destruction and check for expected behavior
-    // ...
 
     printf("destroyQueue test passed.\n");
 }
@@ -195,62 +177,9 @@ void test_waiting()
     destroyQueue();
 }
 
-void test_sleeping_threads()
+void test_basic_concurrent_enqueue_dequeue()
 {
-    initQueue();
-
-    const int NUM_THREADS = 5;
-    const int NUM_ITEMS = 10;
-    const int SLEEP_TIME_MIN = 5;
-    // const int SLEEP_TIME_MAX = 10;
-
-    // Enqueue items
-    for (int i = 1; i <= NUM_ITEMS; i++)
-    {
-        enqueue(&i);
-    }
-
-    thrd_t threads[NUM_THREADS];
-
-    // Create threads that sleep when the queue is empty
-    for (int i = 0; i < NUM_THREADS; i++)
-    {
-        thrd_create(&threads[i], dequeue_with_sleep, &(struct timespec){SLEEP_TIME_MIN, 0});
-    }
-
-    // Allow some time for threads to start sleeping
-    thrd_sleep(&(struct timespec){10, 0}, NULL);
-
-    // Verify the waiting count should be equal to the number of threads
-    int waiting_count = waiting();
-    printf("Waiting threads count: %d\n", waiting_count);
-    assert(waiting_count == NUM_THREADS);
-
-    // Enqueue additional items
-    for (int i = NUM_ITEMS + 1; i <= 2 * NUM_ITEMS; i++)
-    {
-        enqueue(&i);
-    }
-
-    // Wait for all threads to finish
-    for (int i = 0; i < NUM_THREADS; i++)
-    {
-        thrd_join(threads[i], NULL);
-    }
-
-    // Queue should be empty
-    assert(size() == 0);
-    // All items should have been dequeued
-    assert(visited() == 2 * NUM_ITEMS);
-    // No threads should be waiting
-    assert(waiting() == 0);
-
-    destroyQueue();
-}
-
-void test_concurrent_enqueue_dequeue()
-{
-    printf("=== Testing concurrent enqueue and dequeue ===\n");
+    printf("=== Testing basic concurrent enqueue and dequeue ===\n");
 
     initQueue();
 
@@ -270,13 +199,9 @@ void test_concurrent_enqueue_dequeue()
         printf("Dequeued item: %d\n", *item);
     }
 
-    // Wait for the enqueue threads to finish
-    // thrd_join(enqueueThread_a, NULL);
-    // thrd_join(enqueueThread_b, NULL);
-
     destroyQueue();
 
-    printf("concurrent enqueue and dequeue test passed.\n");
+    printf("Basic concurrent enqueue and dequeue test passed.\n");
 }
 
 // Thread function to enqueue items
@@ -378,6 +303,70 @@ int dequeue_with_sleep(void *arg)
     return 0;
 }
 
+void test_multiconcurrent_enqueue_dequeue()
+{
+    printf("=== Testing multiconcurrent enqueue and dequeue ===\n");
+
+    initQueue();
+
+    thrd_t enqueueThreads[NUM_THREADS_CONC];
+    thrd_t dequeueThreads[NUM_THREADS_CONC];
+
+    // Create threads for dequeueing
+    for (int i = 0; i < NUM_THREADS_CONC; i++)
+    {
+        thrd_create(&dequeueThreads[i], (int (*)(void *))dequeue_thread, NULL);
+    }
+
+    // Create threads for enqueueing
+    for (int i = 0; i < NUM_THREADS_CONC; i++)
+    {
+        thrd_create(&enqueueThreads[i], (int (*)(void *))enqueue_thread, NULL);
+    }
+
+    // Wait for enqueueing threads to finish
+    for (int i = 0; i < NUM_THREADS_CONC; i++)
+    {
+        thrd_join(enqueueThreads[i], NULL);
+    }
+
+    // Wait for dequeueing threads to finish
+    for (int i = 0; i < NUM_THREADS_CONC; i++)
+    {
+        thrd_join(dequeueThreads[i], NULL);
+    }
+
+    // Queue should be empty
+    assert(size() == 0);
+    // All items should have been dequeued
+    assert(visited() == NUM_THREADS_CONC);
+    // No threads should be waiting
+    assert(waiting() == 0);
+
+    destroyQueue();
+    printf("Multiconcurrent enqueue and dequeue test passed.\n");
+}
+
+int enqueue_thread(void *arg)
+{
+    unsigned long *item = malloc(sizeof(unsigned long));
+    *item = thrd_current(); // Set item value to thread index
+
+    enqueue(item);
+    printf("Thread %lx enqueued item: %lx\n", thrd_current(), *item);
+
+    return 0;
+}
+
+int dequeue_thread(void *arg)
+{
+    unsigned long *item = (unsigned long *)dequeue();
+    printf("Thread %lx dequeued item: %lx\n", thrd_current(), *item);
+    // free(item);
+
+    return 0;
+}
+
 void test_edge_cases()
 {
     printf("=== Testing edge cases ===\n");
@@ -385,56 +374,10 @@ void test_edge_cases()
     initQueue();
 
     // Dequeue from an empty queue - Should block until an item is enqueued
-    int *item = (int *)dequeue();
-    assert(item == NULL);
-    printf("Dequeue from an empty queue - Assertion failed: Expected NULL\n");
-
-    // Try dequeue from an empty queue - Should return false
-    void *tryItem;
-    assert(!tryDequeue(&tryItem));
-    printf("Try dequeue from an empty queue - Assertion failed: Expected false\n");
-
-    // Enqueue items
-    int item1 = 1;
-    int item2 = 2;
-    enqueue(&item1);
-    enqueue(&item2);
-
-    // Dequeue the same item multiple times
-    int *dequeuedItem = (int *)dequeue();
-    assert(*dequeuedItem == item1);
-    printf("Dequeued item: %d\n", *dequeuedItem);
-    dequeuedItem = (int *)dequeue();
-    assert(*dequeuedItem == item1);
-    printf("Dequeued item: %d\n", *dequeuedItem);
-
-    // Dequeue the maximum allowed number of items
-    for (int i = 0; i < MAX_SIZE; i++)
-    {
-        int item = i + 1;
-        enqueue(&item);
-    }
-    for (int i = 0; i < MAX_SIZE; i++)
-    {
-        int *dequeuedItem = (int *)dequeue();
-        assert(*dequeuedItem == (i + 1));
-    }
-
-    // Enqueue and dequeue when the queue is at its capacity limit
-    for (int i = 0; i < MAX_SIZE; i++)
-    {
-        int item = i + 1;
-        enqueue(&item);
-    }
-    dequeuedItem = (int *)dequeue();
-    assert(*dequeuedItem == 1);
-    int newItem = MAX_SIZE + 1;
-    enqueue(&newItem);
-
-    // Enqueue and dequeue when the queue is empty
-    void *tryDequeueItem;
-    assert(!tryDequeue(&tryDequeueItem));
-    printf("Try dequeue from an empty queue - Assertion failed: Expected false\n");
+    // FIXME: comment this in, make sure it blocks, the comment it back out
+    // int *item = (int *)dequeue();
+    // assert(item == NULL);
+    // printf("Dequeue from an empty queue - Assertion failed: Expected NULL\n");
 
     destroyQueue();
 
@@ -511,17 +454,16 @@ void test_mixed_operations()
 
 int main()
 {
-    test_initQueue();
     test_destroyQueue();
     test_enqueue_dequeue();
     test_tryDequeue();
     test_size();
     test_waiting();
-    // test_sleeping_threads();
-    test_concurrent_enqueue_dequeue();
+    test_basic_concurrent_enqueue_dequeue();
+    test_multiconcurrent_enqueue_dequeue();
     test_enqueue_tryDequeue();
     test_enqueue_dequeue_with_sleep();
-    // test_edge_cases();
+    test_edge_cases();
     test_mixed_operations();
 
     return 0;

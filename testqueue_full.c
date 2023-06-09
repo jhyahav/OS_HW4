@@ -323,9 +323,6 @@ void test_multiconcurrent_enqueue_dequeue()
     {
         thrd_create(&enqueueThreads[i], (int (*)(void *))enqueue_thread, NULL);
     }
-
-    printf("ENTERING WAIT\n\n");
-
     // Wait for enqueueing threads to finish
     for (int i = 0; i < NUM_THREADS_CONC; i++)
     {

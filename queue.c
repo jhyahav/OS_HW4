@@ -102,14 +102,10 @@ void free_all_data_elements(void)
 void destroy_thread_queue(void)
 {
     terminator = thrd_current();
-    struct ThreadElement *prev_head;
     while (thread_queue.head != NULL)
     {
-        prev_head = thread_queue.head;
-        thread_queue.head = prev_head->next;
-        prev_head->terminated = true;
-        cnd_signal(&prev_head->cnd_thread);
-        free(prev_head); // FIXME: signal doesn't block, free() should be called by the thread itself!!!!
+        thread_queue.head->terminated = true;
+        cnd_signal(&thread_queue.head->cnd_thread);
     }
     thread_queue.tail = NULL;
     thread_queue.waiting_count = 0;
@@ -120,11 +116,12 @@ void enqueue(void *element_data)
     mtx_lock(&data_queue.data_queue_lock);
     struct DataElement *new_element = create_element(element_data);
     add_element_to_data_queue(new_element);
+    mtx_unlock(&data_queue.data_queue_lock);
+
     if (data_queue.queue_size > 0 && thread_queue.waiting_count > 0)
     {
         cnd_signal(&thread_queue.head->cnd_thread);
     }
-    mtx_unlock(&data_queue.data_queue_lock);
 }
 
 struct DataElement *create_element(void *data)
@@ -169,10 +166,14 @@ void *dequeue(void)
         cnd_wait(&current->cnd_thread, &data_queue.data_queue_lock);
         if (current->terminated)
         {
+            struct ThreadElement *prev_head;
+            prev_head = thread_queue.head;
+            thread_queue.head = prev_head->next;
             // Prevents runaway threads upon destruction
+            free(prev_head);
             thrd_join(terminator, NULL);
         }
-        if (get_current_first_waiting_on() <= data_queue.head->index)
+        if (data_queue.head && get_current_first_waiting_on() <= data_queue.head->index)
         {
             thread_dequeue();
         }
@@ -198,9 +199,12 @@ bool current_thread_should_sleep(void)
     {
         return true;
     }
-
+    if (thread_queue.waiting_count <= data_queue.queue_size)
+    {
+        return false;
+    }
     int first_waiting_on = get_current_first_waiting_on();
-    return first_waiting_on <= data_queue.head->index && first_waiting_on >= 0;
+    return first_waiting_on > data_queue.head->index;
 }
 
 int get_current_first_waiting_on(void)

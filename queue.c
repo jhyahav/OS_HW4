@@ -10,14 +10,14 @@ struct ThreadQueue
     atomic_ulong waiting_count;
 };
 
-struct ThreadElement // TODO: add tracker for which data element corresponds to thread for dequeue
+struct ThreadElement
 {
     thrd_t id;
     struct ThreadElement *next;
     // Each thread has its own condition variable so we can signal it independently.
     cnd_t cnd_thread;
     bool terminated;
-    int waiting_on; // TODO: add me!
+    int waiting_on;
 };
 
 // We implement the queue as a linked list, saving its head and tail.
@@ -27,14 +27,14 @@ struct DataQueue
     struct DataElement *tail;
     atomic_ulong queue_size;
     atomic_ulong visited_count;
-    atomic_ulong enqueued_count; // TODO: add me!
+    atomic_ulong enqueued_count;
     mtx_t data_queue_lock;
 };
 
 struct DataElement
 {
     struct DataElement *next;
-    int index; // TODO: add me!
+    int index;
     void *data;
 };
 
@@ -59,6 +59,7 @@ void add_element_to_thread_queue(struct ThreadElement *new_element);
 void add_element_to_empty_thread_queue(struct ThreadElement *new_element);
 void add_element_to_nonempty_thread_queue(struct ThreadElement *new_element);
 struct ThreadElement *create_thread_element(void);
+int get_current_first_waiting_on(void);
 
 void initQueue(void)
 {
@@ -69,13 +70,13 @@ void initQueue(void)
     data_queue.queue_size = 0;
     thread_queue.waiting_count = 0;
     data_queue.visited_count = 0;
+    data_queue.enqueued_count = 0;
     mtx_init(&data_queue.data_queue_lock, mtx_plain);
 }
 
 void destroyQueue(void)
 {
     mtx_lock(&data_queue.data_queue_lock);
-
     free_all_data_elements();
     destroy_thread_queue();
     mtx_unlock(&data_queue.data_queue_lock);
@@ -95,6 +96,7 @@ void free_all_data_elements(void)
     data_queue.tail = NULL;
     data_queue.visited_count = 0;
     data_queue.queue_size = 0;
+    data_queue.enqueued_count = 0;
 }
 
 void destroy_thread_queue(void)
@@ -107,7 +109,7 @@ void destroy_thread_queue(void)
         thread_queue.head = prev_head->next;
         prev_head->terminated = true;
         cnd_signal(&prev_head->cnd_thread);
-        free(prev_head); // FIXME: signal doesn't block, free() should be called by the thread itself!
+        free(prev_head); // FIXME: signal doesn't block, free() should be called by the thread itself!!!!
     }
     thread_queue.tail = NULL;
     thread_queue.waiting_count = 0;
@@ -115,23 +117,19 @@ void destroy_thread_queue(void)
 
 void enqueue(void *element_data)
 {
-    // cnd_t *last_cnd = NULL;
-    struct DataElement *new_element = create_element(element_data);
     mtx_lock(&data_queue.data_queue_lock);
+    struct DataElement *new_element = create_element(element_data);
     add_element_to_data_queue(new_element);
     mtx_unlock(&data_queue.data_queue_lock);
 
     // fine-grained data helps us wake up the specific thread we need. adding IDs should help with this
     // after adding ids, we should be able to transform this while loop into an if statement
-    while (data_queue.queue_size > 0 && thread_queue.waiting_count > 0) //&& last_cnd != &thread_queue.head->cnd_thread)
+    if (data_queue.queue_size > 0 && thread_queue.waiting_count > 0)
     {
         printf("%d\n", !!thread_queue.head);
-        // printf("%lx\n", &thread_queue.head->cnd_thread);
         cnd_signal(&thread_queue.head->cnd_thread);
         // TODO: thread_dequeue should be called here!!!! FIXME: important
-        // last_cnd = &thread_queue.head->cnd_thread;
     }
-    // mtx_unlock(&thread_queue.thread_queue_lock);
 }
 
 struct DataElement *create_element(void *data)
@@ -140,6 +138,7 @@ struct DataElement *create_element(void *data)
     struct DataElement *element = (struct DataElement *)malloc(sizeof(struct DataElement));
     element->data = data;
     element->next = NULL;
+    element->index = data_queue.enqueued_count;
     return element;
 }
 
@@ -153,6 +152,7 @@ void add_element_to_empty_data_queue(struct DataElement *new_element)
     data_queue.head = new_element;
     data_queue.tail = new_element;
     data_queue.queue_size++;
+    data_queue.enqueued_count++;
 }
 
 void add_element_to_nonempty_data_queue(struct DataElement *new_element)
@@ -160,6 +160,7 @@ void add_element_to_nonempty_data_queue(struct DataElement *new_element)
     data_queue.tail->next = new_element;
     data_queue.tail = new_element;
     data_queue.queue_size++;
+    data_queue.enqueued_count++;
 }
 
 void *dequeue(void)
@@ -176,7 +177,10 @@ void *dequeue(void)
             // Prevents runaway threads upon destruction
             thrd_join(terminator, NULL);
         }
-        thread_dequeue();
+        if (get_current_first_waiting_on() <= data_queue.head->index)
+        {
+            thread_dequeue(); // FIXME: move
+        }
     }
 
     struct DataElement *dequeued_data = data_queue.head;
@@ -193,18 +197,36 @@ void *dequeue(void)
     return data;
 }
 
-bool current_thread_should_sleep(void) // TODO: ensure no multiple entries in thread queue.
+bool current_thread_should_sleep(void)
 {
     /*
         TODO: after assigning each thread queue element its corresponding data element id/index,
         what we need to do is instead of relying on counts, etc, check if the id/index the current thread needs
         is at the head of the thread queue and go to sleep if not
     */
-    bool queue_is_empty = data_queue.queue_size == 0;
-    bool waiting_threads_exist = thread_queue.waiting_count > 0 && thread_queue.head; // FIXME: is this necessary?
-    // bool current_is_oldest_thread = thrd_equal(thrd_current(), thread_queue.head->id);
-    return queue_is_empty; //|| (waiting_threads_exist && !current_is_oldest_thread);
-    // if number of waiting threads is greater than number of elements in data queue, can dequeue
+    if (data_queue.queue_size == 0)
+    {
+        return true;
+    }
+
+    int first_waiting_on = get_current_first_waiting_on();
+    printf("%d\n", first_waiting_on);
+    return first_waiting_on <= data_queue.head->index && first_waiting_on >= 0;
+    // // if number of waiting threads is greater than number of elements in data queue, can dequeue
+}
+
+int get_current_first_waiting_on(void)
+{
+    struct ThreadElement *thread_element = thread_queue.head;
+    while (thread_element != NULL)
+    {
+        if (thrd_equal(thrd_current(), thread_element->id))
+        {
+            return thread_element->waiting_on;
+        }
+        thread_element = thread_element->next;
+    }
+    return -1;
 }
 
 void thread_enqueue(void)
@@ -215,7 +237,10 @@ void thread_enqueue(void)
 
 void thread_dequeue(void)
 {
-    // cnd_destroy(&thread_queue.head->cnd_thread); FIXME: could this be our culprit?
+    // if (!thread_queue.head)
+    // {
+    //     return;
+    // }
     struct ThreadElement *dequeued_thread = thread_queue.head;
     thread_queue.head = thread_queue.head->next;
     free(dequeued_thread);
@@ -252,6 +277,7 @@ struct ThreadElement *create_thread_element(void)
     thread_element->next = NULL;
     thread_element->terminated = false;
     cnd_init(&thread_element->cnd_thread);
+    thread_element->waiting_on = data_queue.enqueued_count + thread_queue.waiting_count;
     return thread_element;
 }
 

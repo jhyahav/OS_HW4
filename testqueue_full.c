@@ -6,7 +6,7 @@
 
 #define NUM_OPERATIONS 10
 #define MAX_SIZE 1000
-#define NUM_THREADS_CONC 5
+#define NUM_THREADS_CONC 100
 
 int dequeue_with_sleep(void *arg);
 int enqueueItems(void *arg);
@@ -323,6 +323,8 @@ void test_multiconcurrent_enqueue_dequeue()
     {
         thrd_create(&enqueueThreads[i], (int (*)(void *))enqueue_thread, NULL);
     }
+
+    printf("ENTERING WAIT\n\n");
 
     // Wait for enqueueing threads to finish
     for (int i = 0; i < NUM_THREADS_CONC; i++)

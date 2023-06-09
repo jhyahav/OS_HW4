@@ -120,16 +120,11 @@ void enqueue(void *element_data)
     mtx_lock(&data_queue.data_queue_lock);
     struct DataElement *new_element = create_element(element_data);
     add_element_to_data_queue(new_element);
-    mtx_unlock(&data_queue.data_queue_lock);
-
-    // fine-grained data helps us wake up the specific thread we need. adding IDs should help with this
-    // after adding ids, we should be able to transform this while loop into an if statement
     if (data_queue.queue_size > 0 && thread_queue.waiting_count > 0)
     {
-        printf("%d\n", !!thread_queue.head);
         cnd_signal(&thread_queue.head->cnd_thread);
-        // TODO: thread_dequeue should be called here!!!! FIXME: important
     }
+    mtx_unlock(&data_queue.data_queue_lock);
 }
 
 struct DataElement *create_element(void *data)
@@ -179,7 +174,7 @@ void *dequeue(void)
         }
         if (get_current_first_waiting_on() <= data_queue.head->index)
         {
-            thread_dequeue(); // FIXME: move
+            thread_dequeue();
         }
     }
 
@@ -199,20 +194,13 @@ void *dequeue(void)
 
 bool current_thread_should_sleep(void)
 {
-    /*
-        TODO: after assigning each thread queue element its corresponding data element id/index,
-        what we need to do is instead of relying on counts, etc, check if the id/index the current thread needs
-        is at the head of the thread queue and go to sleep if not
-    */
     if (data_queue.queue_size == 0)
     {
         return true;
     }
 
     int first_waiting_on = get_current_first_waiting_on();
-    printf("%d\n", first_waiting_on);
     return first_waiting_on <= data_queue.head->index && first_waiting_on >= 0;
-    // // if number of waiting threads is greater than number of elements in data queue, can dequeue
 }
 
 int get_current_first_waiting_on(void)
@@ -237,10 +225,6 @@ void thread_enqueue(void)
 
 void thread_dequeue(void)
 {
-    // if (!thread_queue.head)
-    // {
-    //     return;
-    // }
     struct ThreadElement *dequeued_thread = thread_queue.head;
     thread_queue.head = thread_queue.head->next;
     free(dequeued_thread);
